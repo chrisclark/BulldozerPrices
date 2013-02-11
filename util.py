@@ -20,9 +20,11 @@ def get_df(filename, converters=None):
     return pd.read_csv(os.path.join(data_path, filename), converters=converters)
 
 def write_submission(submission_name, predictions):
+    print "writing submission '" + submission_name + "'..."
     test_sub = get_df(FILE_TEST)
     test_sub = test_sub.join(pd.DataFrame({"SalePrice": predictions}))
     test_sub[["SalesID", "SalePrice"]].to_csv(submission_path + submission_name, index=False)
+    print "done."
     
 def saledate(date_column):
     return pd.DataFrame({
@@ -93,35 +95,32 @@ def AddFeature(featureFn, colName):
     train = train.join(featureFn(train[colName])).drop(colName, axis=1)
     test = test.join(featureFn(test[colName])).drop(colName, axis=1)
 
+def featuresToDisk(description):
+    global train
+    global test
+    print "writing " + description + "..."
+    train.to_csv("train_" + description + ".csv", index=False)
+    test.to_csv("test_" + description + ".csv", index=False)
+    print "done."
+
 def getTrainTestFeatureMatrix(build=True):
     if build:
         
-        #read in the raw data
         global train
         global test
+        
+        #read in the raw data
         train = get_df(FILE_TRAIN, {"saledate": parse})
         test = get_df(FILE_TEST, {"saledate": parse})
         machine_info = get_df(FILE_MACHINE_INFO)
         
         #preemptively drop overlapping columns and merge
         DropFromBoth(['YearMade','fiModelDesc','fiBaseModel','fiSecondaryDesc','fiModelSeries','fiModelDescriptor','fiProductClassDesc','ProductGroup','ProductGroupDesc'])
-        
         train = train.merge(machine_info, on="MachineID")
         test = test.merge(machine_info, on="MachineID")
+        DropFromBoth('ModelID_y') #drop overlapping join column
         
-        #drop the final overlapping column now that we've joined on it
-        DropFromBoth('ModelID_x')
-        
-        #drop salesID because there is no information encoded in it
-        DropFromBoth('SalesID')
-        
-        print "Joining done...writing intermediate file..."
-        train.to_csv("joined_train.csv")
-        test.to_csv("joined_test.csv")
-        print "done."
-        
-        #build a list of all other features we want to construct
-        columns = set(test.columns)
+        print "joining done"
         
         #build special features
         AddFeature(YearMade, "MfgYear")
@@ -131,21 +130,16 @@ def getTrainTestFeatureMatrix(build=True):
         AddFeature(Undercarriage_Pad_Width, "Undercarriage_Pad_Width")
         AddFeature(MachineHoursCurrentMeter, "MachineHoursCurrentMeter")
         
-        print "Feature phase 1 complete...writing intermediate file..."
-        train.to_csv("f1_train.csv")
-        test.to_csv("f1_test.csv")
-        print "done."
+        print "feature pass 1 done"
         
-        #default feature construction
-        for col in columns:
-            if train[col].dtype == np.dtype('object'):
-                AddFeature(BuildCategorical, col)
+        #Build categoricals for any non-numeric columns
+        for col in set(train.columns):
+            if train[col].dtype == np.dtype('object'): AddFeature(BuildCategorical, col)
         
-        print "Completed building feature matrix. Writing results to disk."
-        train.to_csv("fm_train.csv")
-        test.to_csv("fm_test.csv")
-        print "done."
+        featuresToDisk("finalfeatures")
     else:
+        print "Reading feature matrix from disk..."
         train = pd.read_csv("fm_train.csv")
         test = pd.read_csv("fm_test.csv")
+        print "done."
     return train, test
